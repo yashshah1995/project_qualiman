@@ -1,6 +1,7 @@
 # The back end code of QualimanApp
 # Please make sure to follow PEP8 style guidelines
-# Also, don't forget to document your functions and describe your commits!
+# Also, kindly don't forget to document your functions when they are "final",
+# and describe your commits to GitHub
 
 # If required for some systems (Currently not required!)
 #Sys.setlocale("LC_CTYPE", "en_US.UTF-8")
@@ -8,14 +9,14 @@
 
 box::use(ggplot2[coord_cartesian], shiny[...],magrittr[...])
 box::use(shinymanager[secure_server, check_credentials])
-box::use(DT[renderDataTable])
+box::use(DT[dt_render = renderDataTable])
 
 #options(box.path = "./")
 box::use(./sec_cohort_analysis)
 box::use(./plot_renderings)
 box::use(./db_controller)
 box::use(./plot_renders_data)
-
+box::use(./user_mgmt)
 
 
 server <- function(input, output, session) {
@@ -26,30 +27,21 @@ server <- function(input, output, session) {
     check_credentials = db_controller$check_hashed_credentials
   )
 
-  output$auth_output = renderPrint({
-    reactiveValuesToList(res_auth)
-  })
-
   # Define the logon details with a reactive variable
   auth_output <- reactive({
     reactiveValuesToList(res_auth)
   })
 
-  output$user_role = renderText(paste("You are logged in as",
-                                      expr=auth_output()$role))
   output$role = reactive({
     auth_output()$role
   })
 
-  # All output variables that need to be transferred to UI should have
-  # suspendWhenHidden = FALSE:
-  outputOptions(output, "role", suspendWhenHidden = FALSE)
 
   #Generate users table output for admins
   conn = db_controller$create_connection()
   app_users = db_controller$load_data(conn, 'vw_app_users')
   db_controller$disconnect_conn(conn)
-  output$users_table = renderDataTable({app_users},
+  output$users_table = dt_render({app_users},
     options = list(searching = TRUE, pageLength = 10,
                    lengthMenu = c(5, 10, 15, 20), scrollX = T))
 
@@ -67,7 +59,7 @@ server <- function(input, output, session) {
 
   #Overall Statistical table
   observe({
-    output[[paste0("tab", input$tables)]] <- renderDataTable(server=FALSE,
+    output[[paste0("tab", input$tables)]] <- dt_render(server=FALSE,
       sec_cohort_analysis$statstable(input$tables), extensions = 'Buttons',
       options = list(dom = 'Bfrtip', searching = FALSE, pageLength = 10,
                      lengthMenu = c(5, 10, 15, 20),scrollX = T,
@@ -83,8 +75,7 @@ server <- function(input, output, session) {
      renderPlot(plot_renderings$k1_criteria(input$plotsk1))
    })
 
-  # Separate observe event for downloading the data. TODO: Figure out a way to
-  # dynamically name the downloaded data
+  # Separate observe event for downloading the data.
 
   observe({
     output[[paste0("data", input$plotsk1)]] <-
@@ -136,59 +127,117 @@ server <- function(input, output, session) {
         })
   })
 
+  # All output variables that need to be transferred to the UI should have
+  # suspendWhenHidden = FALSE:
+  outputOptions(output, "role", suspendWhenHidden = FALSE)
+
+  #------------------------------------------------------------------------------
+
+  #' User management system; Allows to add or delete new users with different level
+  #' of access (user_mgmt.R module)
+
+  # Show add-user modal when button is clicked.
+  observeEvent(input$show, {
+    showModal(user_mgmt$user_modal())
+  })
+
+  #' Checks for duplicate username, returns to previous model if True
+  #' Else stores successfully
+  #' only store the information if the user clicks submit
+  observeEvent(input$submit,{
+    dupli_user = db_controller$check_dupli_user(input$usrname)
+    if (dupli_user$result)
+    {
+      showModal(user_mgmt$user_modal(failed = TRUE, FALSE))
+    }
+    else
+    {
 
 
+      if (input$pwd_vali != input$pwd)
+      {
+        showModal(user_mgmt$user_modal(FALSE, failed_vali = TRUE))
+      }
+      else
+      {
 
+        if (input$pwd_vali != input$pwd)
+        {
+          showModal(user_mgmt$user_modal(FALSE, failed_vali = TRUE))
+        }
+        else
+        {
+          removeModal()
+
+          db_controller$add_user(input$usrname, input$pwd, input$role)
+
+        }
+
+
+      }
+
+
+    }
+  })
+  # Show delete user modal when button is clicked.
+  observeEvent(input$del, {
+    showModal(user_mgmt$del_modal())
+  })
+
+  #' Delete Modal conditions; Checks if user exists, otherwise return
+  #' Checks if username is currently logged in, if True, then stop
+  #' Checks user-role; if Admin; Ask for password
+  #' if viewer, delete successfully
+
+  observeEvent(input$submit_del_selec,{
+    usr_role <- 0
+    usr_details <- db_controller$check_dupli_user(input$usrname_s)
+    usr_exist <- usr_details$result
+    usr_role <- usr_details$role
+    if (usr_exist)
+    {
+      if (input$usrname_s == auth_output()$user)
+      {
+        removeModal()
+        showModal(modalDialog(
+          tags$h2('Cannot delete logged user'),
+          footer = tagList(
+            modalButton('OK'))
+        ))
+      }
+      else
+      {
+        if (usr_role == 1)
+        {
+          removeModal()
+          showModal(user_mgmt$delete_admin_modal())
+        }
+        else
+        {
+          removeModal()
+          db_controller$del_user(input$usrname_s)
+          usr_role <- 0
+        }
+      }
+    }
+    else
+    {
+      showModal(user_mgmt$del_modal(failed = TRUE))
+    }
+  })
+
+  #' Checks for password prompt when delete user is admin
+
+  observeEvent(input$submit_a,{
+    dupli_user = db_controller$check_hashed_credentials(auth_output()$user, input$pwd_a)
+    if (dupli_user$result)
+    {
+      removeModal()
+      db_controller$del_user(input$usrname_s)
+    }
+    else
+    {
+      showModal(user_mgmt$delete_admin_modal(failed = TRUE))
+    }
+  })
 }
-
-
-
-#---------------------------------------------------------------------------------
-#Extra code (Just for reference in future)
-
-#' Event which dynamically changes plot region based on selected area (Not very efficient)
-#' Currently not required
-
-# observeEvent(input$plot1_dblclick, {
-#  brush <- input$plot1_brush
-#  if (!is.null(brush)) {
-#    ranges$x <- c(brush$xmin, brush$xmax)
-#    ranges$y <- c(brush$ymin, brush$ymax)
-
-# } else {
-#    ranges$x <- NULL
-#    ranges$y <- NULL
-#  } })
-
-#output$data_K1DKEplot <- downloadHandler(filename = function() {
-#paste0("k1_dke",Sys.Date(),".csv", sep='')
-# },
-#content = function(file) {
-# plot_renders_data$k1_criteria("dke")  %>% write.csv(file, row.names = FALSE)
-#  }
-# )
-
-#For interactive select, and zoom into plots
-#ranges <- reactiveValues(x = NULL, y = NULL)
-
-
-#output$K1DEplot = renderPlot(plot_renderings$k1_criteria("de"))
-
-#output$K2DKEplot = renderPlot(plot_renderings$k2_criteria("dke"))
-
-#output$K2DEplot = renderPlot(plot_renderings$k2_criteria("de"))
-
-#output$K2absolDKEplot = renderPlot(plot_renderings$k2_absol_criteria("k2absolDKE"))
-
-#output$K2absolDEplot = renderPlot(plot_renderings$k2_absol_criteria("k2absolDE"))
-
-#output$K2DKEDEplot = renderPlot(plot_renderings$k2_criteria("dkede"))
-
-#output$K2DKEDEabsolplot = renderPlot(plot_renderings$k2_absol_criteria("k2absolboth"))
-
-#output$K1DKEplot = renderPlot(plot_renderings$k1_criteria("dke"))
-# + coord_cartesian(xlim = ranges$x, ylim = ranges$y, expand = FALSE))
-
-
-
-

@@ -88,7 +88,89 @@ disconnect_conn <- function(conn_name){
 }
 
 
+#' @export
+add_user <- function(usr_name, pwd, role_id){
 
+  #' Add a new user through the admin panel
+  #' Takes name, password and role from prompt
+  #' Converts the password into hashed query and stores the three variables in database
+  #' along with other required columns, as parametrised query
+
+  con <- create_connection()
+  config = get("db_local")
+  date_time <- format(Sys.time(), '%Y-%m-%d %H:%M:%S')
+  admin_id <- config$uid
+  hashedpwd <- password_store(pwd)
+
+  param_sql = dbSendQuery(conn = con,
+                          statement = "INSERT into public.app_users (username, user_password, account_start, account_expire, user_role, last_updated_by, last_updated_at) VALUES ($1, $2, NULL, NULL, $3, $4, $5);"
+  )
+
+  dbBind(res = param_sql, params = list(usr_name, hashedpwd, role_id, admin_id, date_time))
+  # Release resources and close the DB connection
+  dbClearResult(param_sql)
+  dbDisconnect(con)
+
+
+}
+
+#' @export
+check_dupli_user <- function(usr_name){
+
+  #' Checks if user exists in database
+  #' Takes in username for parameterised query
+  #' and returns TRUE/ FALSE and role of user
+
+  con <- create_connection()
+
+  param_sql = dbSendQuery(
+    conn = con,
+
+    statement = "SELECT username,user_role FROM public.app_users WHERE username=$1"
+  )
+  dbBind(res = param_sql, params = list(usr_name))
+  qry_res = dbFetch(param_sql)
+  # Release resources and close the DB connection
+  dbClearResult(param_sql)
+  dbDisconnect(con)
+
+  # Now we need to check if username matches a record
+
+  if(nrow(qry_res) == 1) # There is a match
+  {
+    ret = list(result = TRUE, role=qry_res$user_role)
+  }
+  else
+  {
+    ret = list(result = FALSE, role = 0)
+  }
+
+  return(ret)
+}
+
+#' @export
+del_user <- function(usr_name){
+
+  #' Delete user functionality
+  #' Takes in username and deletes from database as parameterised query
+  #' Note: Additional checks for safety applied in the other files to account
+  #' for unintended or accidental deletions
+
+  con <- create_connection()
+
+  param_sql = dbSendQuery(
+    conn = con,
+
+    statement = "DELETE FROM public.app_users WHERE username=$1;"
+  )
+
+  dbBind(res = param_sql, params = list(usr_name))
+  # Release resources and close the DB connection
+  dbClearResult(param_sql)
+  dbDisconnect(con)
+
+
+}
 
 
 
